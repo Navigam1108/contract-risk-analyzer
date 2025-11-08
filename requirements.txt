@@ -1,9 +1,4 @@
 streamlit
 google-generativeai
 pymupdf
-transformers
-torch
-accelerate
 pandas
-datasets
-bitsandbytes
