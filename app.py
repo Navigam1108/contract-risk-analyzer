@@ -29,7 +29,7 @@ if uploaded_file is not None:
             st.stop()
         st.success("✅ Text extracted successfully.")
 
-    with st.spinner("Step 2: Identifying clauses with Gemini 2.5 Flash..."):
+    with st.spinner("Step 2: Identifying clauses..."):
         clauses = extract_clauses(full_text)
         if not clauses:
             st.error("Could not identify any clauses. The Gemini API may have had an issue.")
@@ -38,7 +38,7 @@ if uploaded_file is not None:
 
     # --- THIS IS THE NEW PART ---
     # We no longer loop. We make one single batch call.
-    with st.spinner(f"Step 3: Analyzing {len(clauses)} clauses in a single batch..."):
+    with st.spinner(f"Step 3: Analyzing {len(clauses)} clauses."):
         
         analysis_results = analyze_clauses_batch(clauses) # <-- ONE CALL
         
