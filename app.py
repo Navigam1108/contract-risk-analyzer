@@ -94,8 +94,10 @@ if uploaded_file is not None:
     })
     
     st.dataframe(
-        display_df.style.applymap(color_risk, subset=['Risk']),
-        use_container_width=True,
+        # --- FIX 2 ---
+        display_df.style.map(color_risk, subset=['Risk']),
+        # --- FIX 3 ---
+        width='stretch',
         hide_index=True
     )
 
@@ -112,7 +114,8 @@ if uploaded_file is not None:
             st.success(row['plain_english'])
             
             st.markdown("#### Risk Explanation")
-            st.info(row['explanation'])
+            # --- FIX 1 ---
+            st.info(row['risk_explanation'])
             
             st.markdown("#### Original Clause")
             st.text_area("Original", value=row['clause'], height=150, disabled=True, key=f"orig_{index}")

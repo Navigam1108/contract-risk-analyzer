@@ -20,7 +20,7 @@ def load_gemini_model():
         genai.configure(api_key=api_key)
         
         # Use gemini-2.5-flash as requested
-        model = genai.GenerativeModel('gemini-2.5-flash-latest')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         print("Gemini 2.5 Flash (for analysis) loaded successfully.")
         
     except Exception as e:
