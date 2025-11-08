@@ -6,49 +6,41 @@ import json
 import re
 
 # --- Configuration ---
-# TODO: Update this path to your fine-tuned model
-# It could be a local path: "./models/my-phi-3-finetuned"
-# Or a Hugging Face hub name: "my-username/my-phi-3-finetuned"
-MODEL_PATH = "your-username/phi-3.5-mini-instruct-finetuned" 
+# 1. Using the official 4k-instruct model from Microsoft
+MODEL_PATH = "microsoft/Phi-3-mini-4k-instruct"
 
 # We will load the model and tokenizer once and reuse them.
 model = None
 tokenizer = None
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def load_clause_model():
     """
-    Loads the fine-tuned model and tokenizer into memory.
+    Loads the Phi-3 model in 8-bit quantization.
     """
     global model, tokenizer
     
     if model is None:
-        print(f"Loading clause extraction model from {MODEL_PATH} to {device}...")
+        print(f"Loading base model {MODEL_PATH} with 8-bit quantization...")
         try:
             tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+            
+            # 2. Load model with 8-bit quantization and device_map
             model = AutoModelForCausalLM.from_pretrained(
                 MODEL_PATH,
-                torch_dtype=torch.bfloat16, # Use bfloat16 for efficiency
-                device_map=device,
+                load_in_8bit=True,    # <-- The 8-bit flag
+                device_map="auto",  # <-- Automatically uses your GPU
                 trust_remote_code=True,
             )
-            print("Clause model loaded successfully.")
+            print("Base model loaded successfully on your GPU.")
         except Exception as e:
             print(f"Error loading model: {e}")
-            print("Please check that MODEL_PATH in src/clause_extractor.py is correct.")
+            print("Please ensure 'bitsandbytes' is installed (pip install bitsandbytes)")
             model = None # Ensure it stays None if loading failed
 
 def extract_clauses(full_contract_text):
     """
     Extracts all legal clauses from a full contract text using the
-    fine-tuned Phi-3.5 model.
-
-    Args:
-        full_contract_text (str): The complete text from the PDF.
-
-    Returns:
-        list: A list of strings, where each string is an extracted clause.
-              Returns an empty list on failure.
+    base Phi-3 model.
     """
     # 1. Ensure the model is loaded
     if model is None or tokenizer is None:
@@ -56,26 +48,24 @@ def extract_clauses(full_contract_text):
         if model is None: # Check again if loading failed
             return [] 
 
-    # 2. Create the instruction prompt
-    # This prompt asks the model to return a JSON list of strings,
-    # which is the easiest format to parse.
+    # 3. New Zero-Shot Prompt
+    # We must be very explicit since this model is not fine-tuned.
+    # We ask it to act as an expert and strictly return JSON.
     prompt = f"""
     <|system|>
-    You are an expert legal assistant. Your task is to extract all individual clauses from the contract text provided.
-    A clause is a distinct section, paragraph, or provision.
-    Return your answer *only* as a valid JSON list of strings.
-    Example: ["Clause 1 text...", "Clause 2 text...", "Clause 3 text..."]
+    You are a text processing expert. Your task is to extract all distinct clauses from the provided contract text. A clause is a single paragraph or a distinct provision.
+    You must return your answer *only* as a valid JSON list of strings. Do not provide any preamble, explanation, or conversational text. Your entire response must be the JSON list.
+    Example Format: ["This is the first clause.", "This is the second clause.", "This is the third clause."]
     <|end|>
     <|user|>
-    Extract all clauses from the following contract:
-
+    Here is the contract text:
+    
     {full_contract_text}
     <|end|>
     <|assistant|>
     """
 
     # 3. Use a pipeline for easy generation
-    # Using a pipeline handles tokenization, generation, and decoding
     try:
         pipe = pipeline(
             "text-generation",
@@ -86,16 +76,12 @@ def extract_clauses(full_contract_text):
         )
         
         # The 'repetition_penalty' can help if the model repeats itself
-        outputs = pipe(prompt, repetition_penalty=1.1)
+        outputs = pipe(prompt, repetition_penalty=1.1, temperature=0.1)
         
-        # The pipeline returns a list, we take the first result
         generated_text = outputs[0]['generated_text']
-        
-        # The model's output will include the prompt, so we find the assistant's part
         assistant_response = generated_text.split("<|assistant|>")[-1].strip()
 
         # 4. Clean and parse the JSON output
-        # Models sometimes add markdown ```json ... ``` or other text.
         json_match = re.search(r'\[.*\]', assistant_response, re.DOTALL)
         
         if not json_match:
@@ -106,7 +92,6 @@ def extract_clauses(full_contract_text):
         json_string = json_match.group(0)
         clauses = json.loads(json_string)
         
-        # Final check to ensure it's a list of strings
         if isinstance(clauses, list) and all(isinstance(item, str) for item in clauses):
             return clauses
         else:

@@ -21,7 +21,7 @@ def load_gemini_model():
             
         genai.configure(api_key=api_key)
         
-        model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        model = genai.GenerativeModel('gemini-2.5-flash-latest')
         print("Gemini model loaded successfully.")
         
     except Exception as e:
