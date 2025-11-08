@@ -16,3 +16,7 @@ env/
 
 # Temporary files
 temp.pdf
+
+# Local data
+data/
+WINDOWS_PATH_ISSUE.md
