@@ -4,9 +4,9 @@ import streamlit as st
 import pandas as pd
 from src.pdf_processor import extract_text_from_pdf
 from src.clause_extractor import extract_clauses
-from src.risk_analyzer import analyze_clause_with_gemini
+from src.risk_analyzer import analyze_clauses_batch  # <-- IMPORT THE NEW FUNCTION
 
-# --- 1. Page Configuration ---
+# ... (Page config and Title are the same) ...
 st.set_page_config(
     page_title="Contract Risk Analyzer",
     page_icon="📄",
@@ -16,56 +16,48 @@ st.set_page_config(
 st.title("📄 Contract Risk Analyzer")
 st.markdown("Upload a PDF contract to automatically extract clauses, analyze risks with AI, and get plain English summaries.")
 
-# --- 2. File Uploader ---
 uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
 if uploaded_file is not None:
     
     # --- 3. Processing Pipeline ---
-    # Wrap the file object for the PDF processor
-    # (The function in pdf_processor.py expects a file-like object)
     
     with st.spinner("Step 1: Extracting text from PDF..."):
         full_text = extract_text_from_pdf(uploaded_file)
-        
         if full_text is None:
             st.error("Could not extract text from this PDF. It might be an image-based or scanned document.")
             st.stop()
-        
         st.success("✅ Text extracted successfully.")
 
-    with st.spinner("Step 2: Identifying clauses with local Phi-3.5 model..."):
+    with st.spinner("Step 2: Identifying clauses with Gemini 2.5 Flash..."):
         clauses = extract_clauses(full_text)
-        
         if not clauses:
-            st.error("Could not identify any clauses. The local model may have had an issue, or the document format might be unusual.")
+            st.error("Could not identify any clauses. The Gemini API may have had an issue.")
             st.stop()
-            
         st.success(f"✅ Identified {len(clauses)} clauses.")
 
-    with st.spinner(f"Step 3: Analyzing {len(clauses)} clauses with Gemini API... This may take a moment."):
-        results = []
-        progress_bar = st.progress(0, text="Analyzing clauses...")
+    # --- THIS IS THE NEW PART ---
+    # We no longer loop. We make one single batch call.
+    with st.spinner(f"Step 3: Analyzing {len(clauses)} clauses in a single batch..."):
         
+        analysis_results = analyze_clauses_batch(clauses) # <-- ONE CALL
+        
+        # Now we combine the original clauses with their analyses
+        results = []
         for i, clause in enumerate(clauses):
-            analysis = analyze_clause_with_gemini(clause)
-            
-            # Combine the original clause with its analysis
-            result_entry = {
+            analysis = analysis_results[i]
+            results.append({
                 "clause": clause,
                 "risk_level": analysis.get("risk_level", "Error"),
                 "risk_explanation": analysis.get("risk_explanation", "N/A"),
                 "plain_english": analysis.get("plain_english", "N/A"),
                 "error": analysis.get("error", None)
-            }
-            results.append(result_entry)
-            
-            # Update progress bar
-            progress_bar.progress((i + 1) / len(clauses), text=f"Analyzing clause {i+1}/{len(clauses)}")
+            })
             
         st.success("✅ Analysis complete.")
+    # --- END OF NEW PART ---
 
-    # --- 4. Display Results ---
+    # --- 4. Display Results (This section is unchanged) ---
     st.header("Contract Analysis Dashboard")
 
     df = pd.DataFrame(results)
@@ -85,7 +77,6 @@ if uploaded_file is not None:
     # 4b. Results DataGrid
     st.subheader("All Identified Clauses")
     
-    # Simple color-coding for the dataframe
     def color_risk(val):
         color_map = {
             "High": "background-color: #FF4B4B; color: white;",
@@ -96,7 +87,6 @@ if uploaded_file is not None:
         }
         return color_map.get(val, "")
 
-    # Select and rename columns for a cleaner table view
     display_df = df[['risk_level', 'clause', 'plain_english']].rename(columns={
         'risk_level': 'Risk',
         'clause': 'Original Clause',
@@ -122,7 +112,7 @@ if uploaded_file is not None:
             st.success(row['plain_english'])
             
             st.markdown("#### Risk Explanation")
-            st.info(row['risk_explanation'])
+            st.info(row['explanation'])
             
             st.markdown("#### Original Clause")
             st.text_area("Original", value=row['clause'], height=150, disabled=True, key=f"orig_{index}")

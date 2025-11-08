@@ -26,9 +26,8 @@ def extract_text_from_pdf(pdf_file_object):
         # Iterate through each page and extract text
         for page_num in range(len(pdf_document)):
             page = pdf_document.load_page(page_num)
-            # request text output explicitly to ensure a string is returned
-            page_text = page.get_text("text")
-            full_text += page_text
+            full_text += page.get_text()
+            
         pdf_document.close()
         
         if not full_text.strip():

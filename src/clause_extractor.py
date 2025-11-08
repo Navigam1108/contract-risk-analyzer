@@ -1,103 +1,85 @@
 # src/clause_extractor.py
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+import google.generativeai as genai
+import streamlit as st
 import json
 import re
 
-# --- Configuration ---
-# 1. Using the official 4k-instruct model from Microsoft
-MODEL_PATH = "microsoft/Phi-3-mini-4k-instruct"
-
-# We will load the model and tokenizer once and reuse them.
+# We will configure a model for this task
 model = None
-tokenizer = None
 
-def load_clause_model():
+def load_extraction_model():
     """
-    Loads the Phi-3 model in 8-bit quantization.
+    Initializes and configures the Gemini model from Streamlit secrets.
     """
-    global model, tokenizer
-    
-    if model is None:
-        print(f"Loading base model {MODEL_PATH} with 8-bit quantization...")
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    global model
+    try:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY not found in secrets.")
             
-            # 2. Load model with 8-bit quantization and device_map
-            model = AutoModelForCausalLM.from_pretrained(
-                MODEL_PATH,
-                load_in_8bit=True,    # <-- The 8-bit flag
-                device_map="auto",  # <-- Automatically uses your GPU
-                trust_remote_code=True,
-            )
-            print("Base model loaded successfully on your GPU.")
-        except Exception as e:
-            print(f"Error loading model: {e}")
-            print("Please ensure 'bitsandbytes' is installed (pip install bitsandbytes)")
-            model = None # Ensure it stays None if loading failed
+        genai.configure(api_key=api_key)
+        
+        # Using gemini-2.5-flash as requested
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        print("Gemini 2.5 Flash (for extraction) loaded successfully.")
+        
+    except Exception as e:
+        print(f"Error loading Gemini model: {e}")
+        model = None
 
 def extract_clauses(full_contract_text):
     """
     Extracts all legal clauses from a full contract text using the
-    base Phi-3 model.
+    Gemini API.
     """
-    # 1. Ensure the model is loaded
-    if model is None or tokenizer is None:
-        load_clause_model()
-        if model is None: # Check again if loading failed
+    if model is None:
+        load_extraction_model()
+        if model is None:
             return [] 
 
-    # 3. New Zero-Shot Prompt
-    # We must be very explicit since this model is not fine-tuned.
-    # We ask it to act as an expert and strictly return JSON.
+    # 2. Create the extraction prompt
     prompt = f"""
-    <|system|>
-    You are a text processing expert. Your task is to extract all distinct clauses from the provided contract text. A clause is a single paragraph or a distinct provision.
-    You must return your answer *only* as a valid JSON list of strings. Do not provide any preamble, explanation, or conversational text. Your entire response must be the JSON list.
+    You are an expert legal assistant. Your task is to extract all distinct clauses from the provided contract text.
+
+    **Rules:**
+    1.  A "clause" is a full paragraph of text, often starting with a number or letter (e.g., "1.1", "a.").
+    2.  You MUST ignore titles, headers, footers, page numbers, and source citations (e.g., "Source: LINK PLUS CORP").
+    3.  You MUST ignore simple lists of names or definitions that are not full clauses.
+    4.  You MUST return your answer *only* as a valid JSON list of strings.
+    5.  Do not provide any preamble, explanation, or conversational text. Your entire response must be the JSON list.
+
     Example Format: ["This is the first clause.", "This is the second clause.", "This is the third clause."]
-    <|end|>
-    <|user|>
-    Here is the contract text:
-    
+
+    **Contract Text to Analyze:**
+    ---
     {full_contract_text}
-    <|end|>
-    <|assistant|>
+    ---
+
+    **JSON Output:**
     """
 
-    # 3. Use a pipeline for easy generation
+    # 3. Call the API
     try:
-        pipe = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=4096, # Adjust based on expected output size
-            eos_token_id=tokenizer.eos_token_id,
+        print("Sending full contract to Gemini 2.5 Flash for clause extraction...")
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.1,
+                response_mime_type="application/json"
+            )
         )
         
-        # The 'repetition_penalty' can help if the model repeats itself
-        outputs = pipe(prompt, repetition_penalty=1.1, temperature=0.1)
+        # 4. Parse the JSON response
+        json_response = json.loads(response.text)
         
-        generated_text = outputs[0]['generated_text']
-        assistant_response = generated_text.split("<|assistant|>")[-1].strip()
-
-        # 4. Clean and parse the JSON output
-        json_match = re.search(r'\[.*\]', assistant_response, re.DOTALL)
-        
-        if not json_match:
-            print("Error: Model did not return a JSON list.")
-            print("Raw response:", assistant_response)
-            return []
-
-        json_string = json_match.group(0)
-        clauses = json.loads(json_string)
-        
-        if isinstance(clauses, list) and all(isinstance(item, str) for item in clauses):
-            return clauses
+        if isinstance(json_response, list) and all(isinstance(item, str) for item in json_response):
+            print(f"Successfully extracted {len(json_response)} clauses.")
+            return json_response
         else:
             print("Error: Parsed JSON is not a list of strings.")
             return []
 
     except Exception as e:
-        print(f"Error during clause extraction pipeline: {e}")
+        print(f"Error during Gemini API call for extraction: {e}")
         return []
