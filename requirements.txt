@@ -1,0 +1,7 @@
+streamlit
+google-generativeai
+pymupdf
+transformers
+torch
+accelerate # Often helpful with Hugging Face models
+pandas
